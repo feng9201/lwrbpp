@@ -91,6 +91,28 @@ target_link_libraries(my_target PRIVATE lwrbpp::lwrbpp)
 | `linear_read_address()` | 零拷贝读取线性地址 |
 | `linear_write_address()` | 零拷贝写入线性地址 |
 
+## rbpp — librb 消息队列封装
+
+项目同时集成了 [librb](https://librb.bofc.pl/)（Michał Łyszczek）环形缓冲**消息队列**，并提供对应的 C++ 封装 `rbpp::ring_buffer`（头文件 `rb/rbpp.h`）。与 lwrbpp 的字节流语义不同，librb 以“定长对象队列”或“变长动态消息”方式存取。
+
+- **对象/消息语义** — 容量为 `count` 个 `object_size` 字节的对象（`count` 须为 2 的幂）
+- **动态消息** — `rbpp::flag::dynamic` 模式下单次 `read()` 取出整条变长消息，`peek_size()` 预知消息大小
+- **零拷贝** — `write_claim()` / `write_commit()` 直接读写内部缓冲区
+- **散读散写** — `writev()` / `readv()` iovec 接口
+- **多线程阻塞** — 非 MSVC 平台以 `ENABLE_THREADS=1` 编译，支持 `rbpp::flag::multithread` 阻塞式读写；MSVC 自动回退为单线程（`ENABLE_THREADS=0`）
+
+```cpp
+#include "rb/rbpp.h"
+
+rbpp::ring_buffer rb(16, sizeof(SensorData));  // 16 个定长对象
+rb.push_back(SensorData{ 25.3f, 60.1f, 1001 });
+
+SensorData out{};
+rb.pop_front(out);
+```
+
+注意：`rb/rb.h` 由 `rb/rb.h.in` 在构建时经 `configure_file` 生成（替换 `@ENABLE_THREADS@` / `@ENABLE_IOV@`），直接包含源码树中的 `rb.h.in` 无法编译。
+
 ## 许可
 
-MIT License。底层 lwrb 库同样使用 MIT 许可。
+MIT License。底层 lwrb 库使用 MIT 许可，librb 库使用 BSD-2-Clause 许可。

@@ -4,6 +4,7 @@
  */
 
 #include "lwrb/lwrbpp.h"
+#include "rb/rbpp.h"
 #include <cstdio>
 #include <cstring>
 #include <cassert>
@@ -237,6 +238,102 @@ demo_event_callback() {
     printf("\n");
 }
 
+/* ========================== 示例 9: rbpp — 定长对象队列 ========================== */
+
+static void
+demo_rbpp_fixed_queue() {
+    printf("====== 示例 9: rbpp 定长对象队列 ======\n");
+
+    /* 全堆分配：16 个 SensorData 对象 */
+    rbpp::ring_buffer rb(16, sizeof(SensorData));
+    printf("对象数=%ld  空闲=%ld\n", rb.count(), rb.space());
+
+    SensorData d1 = { 22.5f, 48.0f, 2001 };
+    SensorData d2 = { 23.1f, 47.2f, 2002 };
+    rb.push_back(d1);
+    rb.push_back(d2);
+    printf("写入 2 个 SensorData 后，对象数=%ld\n", rb.count());
+
+    SensorData out{};
+    rb.pop_front(out);
+    printf("弹出: 温度=%.1f 时间戳=%u，剩余=%ld\n",
+           out.temperature, out.timestamp, rb.count());
+
+    /* peek 不消耗数据 */
+    SensorData peeked{};
+    rb.recv(&peeked, 1, rbpp::flag::peek);
+    printf("peek: 时间戳=%u，对象数不变=%ld\n", peeked.timestamp, rb.count());
+    printf("\n");
+}
+
+/* ========================== 示例 10: rbpp — 动态消息与外部内存 ========================== */
+
+static void
+demo_rbpp_dynamic_external() {
+    printf("====== 示例 10: rbpp 动态消息 + 外部内存 ======\n");
+
+    /* 外部内存：128 字节容量（对象计数字段），dynamic 模式按变长消息存取。
+     * count 必须为 2 的幂；dynamic 的 object_size 为长度字段宽度（1/2/4/8）。 */
+    static uint8_t mem[128 * 16];
+    rbpp::ring_buffer rb(mem, 128, 2, rbpp::flag::dynamic);
+
+    const char* msg1 = "first message";
+    const char* msg2 = "second, longer message";
+    rb.send(msg1, strlen(msg1) + 1);
+    rb.send(msg2, strlen(msg2) + 1);
+    printf("写入 2 条消息，占用对象数=%ld\n", rb.count());
+
+    /* 先窥视消息大小，再按实际大小读取 */
+    long sz = rb.peek_size();
+    printf("下一条消息大小: %ld\n", sz);
+
+    char buf[64] = {0};
+    long n = rb.read(buf, sizeof(buf));
+    printf("读取 %ld 字节: \"%s\"\n", n, buf);
+
+    n = rb.read(buf, sizeof(buf));
+    printf("读取 %ld 字节: \"%s\"\n", n, buf);
+    printf("\n");
+}
+
+/* ========================== 示例 11: rbpp — 零拷贝 claim/commit ========================== */
+
+static void
+demo_rbpp_zero_copy() {
+    printf("====== 示例 11: rbpp 零拷贝 claim/commit ======\n");
+
+    rbpp::ring_buffer rb(16, sizeof(uint32_t));
+
+    /* 申请写区域，直接写入内部缓冲区 */
+    void* wbuf = nullptr;
+    size_t wcount = 0, objsize = 0;
+    if (rb.write_claim(wbuf, wcount, objsize) == 0) {
+        printf("写区域: %zu 个对象 x %zu 字节\n", wcount, objsize);
+        auto* p = static_cast<uint32_t*>(wbuf);
+        size_t n = wcount < 4 ? wcount : 4;
+        for (size_t i = 0; i < n; ++i) {
+            p[i] = 100u + static_cast<uint32_t>(i);
+        }
+        rb.write_commit(n);
+        printf("提交 %zu 个对象\n", n);
+    }
+
+    /* 申请读区域，直接读内部缓冲区 */
+    const void* rbuf = nullptr;
+    size_t rcount = 0;
+    if (rb.read_claim(rbuf, rcount, objsize) == 0) {
+        const auto* p = static_cast<const uint32_t*>(rbuf);
+        printf("读区域: %zu 个对象: ", rcount);
+        for (size_t i = 0; i < rcount; ++i) {
+            printf("%u ", p[i]);
+        }
+        printf("\n");
+        rb.read_commit(rcount);
+    }
+    printf("提交后对象数=%ld\n", rb.count());
+    printf("\n");
+}
+
 /* ========================== Main ========================== */
 
 int
@@ -252,6 +349,9 @@ main() {
     demo_linear_access();
     demo_move_semantics();
     demo_event_callback();
+    demo_rbpp_fixed_queue();
+    demo_rbpp_dynamic_external();
+    demo_rbpp_zero_copy();
 
     printf("所有示例执行完毕 ✓\n");
     return 0;
